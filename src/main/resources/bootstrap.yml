@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: ChatAiDesign  # 应用名称
+  config:
+    import:
+      - optional:nacos:ChatAiDesign.yaml  # 可选配置导入
+  cloud:
+    nacos:
+      config:
+        server-addr: 47.115.231.102:8848  # Nacos 服务器地址
+        file-extension: yaml  # 配置文件格式
+        group: DEFAULT_GROUP  # 配置分组
+        username: nacos  # Nacos 用户名
+        password: nacos  # Nacos 密码
+        timeout: 3000  # 连接超时时间
+        import-check:
+          enabled: false

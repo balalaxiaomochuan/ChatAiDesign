@@ -1,0 +1,58 @@
+spring:
+  application:
+    name: ChatAiDesign
+  datasource:
+    url: jdbc:mysql://47.115.231.102:3306/arkweb?useSSL=false&serverTimezone=UTC
+    username: xxx
+    password: xxx
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+    jpa:
+      hibernate:
+        ddl-auto: update
+      show-sql: true
+      database-platform: org.hibernate.dialect.MySQL8Dialect
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 47.115.231.102:8848  # Nacos 服务器地址
+        group: DEFAULT_GROUP  # 服务分组
+        username: nacos  # Nacos 用户名
+        password: nacos  # Nacos 密码
+        service: ${spring.application.name}  # 服务名
+      config:
+        server-addr: 47.115.231.102:8848
+        username: nacos
+        password: nacos
+        group: DEFAULT_GROUP
+        file-extension: yaml
+        timeout: 3000
+        refresh-enabled: true
+# Actuator 健康检查配置
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"  # 暴露所有端点
+  endpoint:
+    health:
+      show-details: always  # 显示健康检查详细信息
+
+server:
+  port: 8080
+  servlet:
+    context-path: /chataidesign
+
+# MyBatis 配置
+mybatis:
+  # mapper XML 文件位置
+  mapper-locations: classpath:mapper/*.xml
+  # 实体类包路径
+  type-aliases-package: com.huawei.chataidesign.entity
+  # 配置驼峰命名规则映射
+  configuration:
+    map-underscore-to-camel-case: true
+    # 打印SQL语句（开发环境使用）
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl

@@ -119,7 +119,43 @@
 			<artifactId>spring-kafka</artifactId>
 		</dependency>
 
+		<!-- 添加DashScope SDK依赖 -->
+		<dependency>
+			<groupId>com.alibaba</groupId>
+			<artifactId>dashscope-sdk-java</artifactId>
+			<version>2.12.0</version>
+		</dependency>
+
+		<!-- 其他依赖 -->
+		<dependency>
+			<groupId>junit</groupId>
+			<artifactId>junit</artifactId>
+			<version>4.13.2</version>
+			<scope>test</scope>
+		</dependency>
+
+		<dependency>
+			<groupId>com.openai</groupId>
+			<artifactId>openai-java</artifactId>
+			<version>0.32.0</version>
+		</dependency>
+
 	</dependencies>
+
+	<!-- 添加仓库配置 -->
+	<repositories>
+		<repository>
+			<id>aliyun</id>
+			<name>Aliyun Repository</name>
+			<url>https://maven.aliyun.com/repository/public</url>
+		</repository>
+		<!-- DashScope SDK 仓库 -->
+		<repository>
+			<id>dashscope-sdk-java</id>
+			<name>DashScope SDK for Java</name>
+			<url>https://maven.aliyun.com/repository/dashscope-sdk-java</url>
+		</repository>
+	</repositories>
 
 	<dependencyManagement>
 		<dependencies>

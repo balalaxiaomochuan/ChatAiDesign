@@ -1,43 +1,62 @@
 package com.huawei.chataidesign.controller;
 
+import com.alibaba.dashscope.aigc.generation.Generation;
+import com.alibaba.dashscope.aigc.generation.GenerationParam;
+import com.alibaba.dashscope.aigc.generation.GenerationResult;
+import com.alibaba.dashscope.common.Message;
+import com.alibaba.dashscope.common.Role;
+import io.reactivex.Flowable;
+import io.reactivex.schedulers.Schedulers;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
-import java.io.*;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
-import java.util.UUID;
+import java.util.Arrays;
+import java.util.concurrent.CountDownLatch;
 
 @RestController
 @RequestMapping("/api/ai")
 @Slf4j
 public class AIStreamController {
+    private static final String PRESET_PROMPT = "请不要生成MarkDown形式。\n" +
+            "请在回答完之后，提供几个用户还有可能会想问的问题（两到三个）。";
 
     /**
      * 流式调用大模型API接口
-     * 
+     *
      * @param prompt 用户输入的提示词
      * @return 流式响应结果
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<StreamingResponseBody> streamAIResponse(@RequestBody String prompt) {
         log.info("Received AI stream request with prompt: {}", prompt);
-
+        String finalPrompt = PRESET_PROMPT + prompt;
         StreamingResponseBody responseBody = outputStream -> {
+            CountDownLatch latch = new CountDownLatch(1);
+
             try {
-                // 调用真实的通义千问API并流式返回结果
-                callRealQwenAPI(prompt, outputStream);
+                // 调用通义千问API并流式返回结果
+                callQwenAPIWithSDK(finalPrompt, outputStream, latch);
+                latch.await(); // 等待异步任务完成
             } catch (Exception e) {
                 log.error("Error occurred while streaming AI response", e);
-                // 将错误信息写入输出流，保持SSE格式
-                outputStream.write(("data: Error: " + e.getMessage() + "\n\n").getBytes(StandardCharsets.UTF_8));
-                outputStream.flush();
+                try {
+                    // 将错误信息写入输出流，保持SSE格式
+                    outputStream.write(("data: Error: " + e.getMessage() + "\n\n").getBytes());
+                    outputStream.flush();
+                } catch (Exception ioException) {
+                    log.error("Error writing to output stream", ioException);
+                } finally {
+                    latch.countDown();
+                }
             } finally {
-                outputStream.close();
+                try {
+                    outputStream.close();
+                } catch (Exception e) {
+                    log.error("Error closing output stream", e);
+                }
             }
         };
 
@@ -47,130 +66,99 @@ public class AIStreamController {
     }
 
     /**
-     * 调用真实的通义千问API并流式返回结果
-     * 
+     * 使用DashScope SDK调用通义千问API并流式返回结果
+     *
      * @param prompt 用户输入
      * @param outputStream 响应输出流
-     * @throws IOException IO异常
+     * @param latch 计数锁存器
+     * @throws Exception 异常
      */
-    private void callRealQwenAPI(String prompt, OutputStream outputStream) throws IOException {
-        // 第一步：生成访问令牌
-        String accessToken = generateAccessToken();
-        
-        // 第二步：建立SSE连接
-        String sseUrl = "https://bailian-stream-api.aliyuncs.com/sse/console4Json/" + accessToken;
-        
-        // 第三步：发送消息并获取流式响应
-        sendMessageAndStreamResponse(prompt, sseUrl, outputStream);
+    private void callQwenAPIWithSDK(String prompt, java.io.OutputStream outputStream, CountDownLatch latch) throws Exception {
+        // 1. 获取 API Key
+        String apiKey = System.getenv("ALI_API_KEY");
+        if (apiKey == null || apiKey.isEmpty()) {
+            throw new IllegalStateException("请设置环境变量 ALI_API_KEY");
+        }
+
+        // 2. 初始化 Generation 实例
+        Generation gen = new Generation();
+
+        // 3. 构建请求参数
+        GenerationParam param = GenerationParam.builder()
+                .apiKey(apiKey)
+                .model("qwen-plus")
+                .messages(Arrays.asList(
+                        Message.builder()
+                                .role(Role.USER.getValue())
+                                .content(prompt)
+                                .build()
+                ))
+                .resultFormat(GenerationParam.ResultFormat.MESSAGE)
+                .incrementalOutput(true) // 开启增量输出，流式返回
+                .build();
+
+        // 4. 发起流式调用并处理响应
+        Flowable<GenerationResult> result = gen.streamCall(param);
+
+        result
+                .subscribeOn(Schedulers.io()) // IO线程执行请求
+                .observeOn(Schedulers.computation()) // 计算线程处理响应
+                .subscribe(
+                        // onNext: 处理每个响应片段
+                        message -> {
+                            try {
+                                String content = message.getOutput().getChoices().get(0).getMessage().getContent();
+                                String finishReason = message.getOutput().getChoices().get(0).getFinishReason();
+
+                                // 将换行符替换为自定义占位符（类似Python代码的处理方式）
+                                String processedContent = content.replace("\n", "<|newline|>");
+
+                                // 输出内容，保持正确的SSE格式
+                                outputStream.write(("data: " + processedContent + "\n\n").getBytes());
+                                outputStream.flush();
+
+                                // 当 finishReason 不为 null 时，表示是最后一个 chunk，输出用量信息
+//                                if (finishReason != null && !"null".equals(finishReason)) {
+//                                    String usageInfo = String.format(
+//                                            "<|newline|>--- 请求用量 ---<|newline|>输入 Tokens：%d<|newline|>输出 Tokens：%d<|newline|>总 Tokens：%d",
+//                                            message.getUsage().getInputTokens(),
+//                                            message.getUsage().getOutputTokens(),
+//                                            message.getUsage().getTotalTokens()
+//                                    );
+//
+//                                    outputStream.write(("data: " + usageInfo + "\n\n").getBytes());
+//                                    outputStream.flush();
+//                                }
+                            } catch (Exception e) {
+                                log.error("Error processing message", e);
+                            }
+                        },
+                        // onError: 处理错误
+                        error -> {
+                            try {
+                                String errorMessage = error.getMessage()
+                                        .replace("\n", "\\n")
+                                        .replace("\r", "\\r");
+                                outputStream.write(("data: Error: " + errorMessage + "\n\n").getBytes());
+                                outputStream.flush();
+                            } catch (Exception e) {
+                                log.error("Error writing error to output stream", e);
+                            } finally {
+                                latch.countDown();
+                            }
+                        },
+                        // onComplete: 完成回调
+                        () -> {
+                            try {
+                                outputStream.write("data: [DONE]\n\n".getBytes());
+                                outputStream.flush();
+                            } catch (Exception e) {
+                                log.error("Error writing completion to output stream", e);
+                            } finally {
+                                latch.countDown();
+                            }
+                        }
+                );
     }
 
-    /**
-     * 生成访问令牌
-     * 
-     * @return 访问令牌
-     * @throws IOException IO异常
-     */
-    private String generateAccessToken() throws IOException {
-        String apiUrl = "https://bailian-cs.console.aliyun.com/data/api.json?action=BroadScopeAspnGateway&product=sfm_bailian&api=zeldaEasy.cornerstoneStreamGateway.streamGatewayConsoleService.generateAccessToken&_v=undefined";
-        
-        URL url = new URL(apiUrl);
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setRequestMethod("POST");
-        connection.setRequestProperty("Content-Type", "application/json");
-        connection.setRequestProperty("region", "cn-beijing");
-        connection.setRequestProperty("sec_token", "Nx38Yn8QwqJF4t3Hhzlri1");
-        connection.setDoOutput(true);
-        
-        // 构造请求参数
-        String feTraceId = UUID.randomUUID().toString();
-        String requestBody = "{\n" +
-                "  \"params\": \"{\\\"Api\\\":\\\"zeldaEasy.cornerstoneStreamGateway.streamGatewayConsoleService.generateAccessToken\\\",\\\"V\\\":\\\"1.0\\\",\\\"Data\\\":{\\\"accessTokenRequest\\\":{\\\"source\\\":\\\"\\\"},\\\"cornerstoneParam\\\":{\\\"feTraceId\\\":\\\"" + feTraceId + "\\\",\\\"feURL\\\":\\\"https://bailian.console.aliyun.com/?spm=5176.30260724.J_VtPmWTA0QjMbFsMNZMB1P.1.548b7de1rt2v2u&tab=model#/efm/model_experience_center/text?currentTab=textChat&modelId=qwen3-next-80b-a3b-instruct\\\",\\\"protocol\\\":\\\"V2\\\",\\\"console\\\":\\\"ONE_CONSOLE\\\",\\\"productCode\\\":\\\"p_efm\\\",\\\"switchAgent\\\":12814336,\\\"switchUserType\\\":3,\\\"domain\\\":\\\"bailian.console.aliyun.com\\\",\\\"userNickName\\\":\\\"\\\",\\\"userPrincipalName\\\":\\\"\\\",\\\"xsp_lang\\\":\\\"zh-CN\\\"}}}\",\n" +
-                "  \"region\": \"cn-beijing\",\n" +
-                "  \"sec_token\": \"Nx38Yn8QwqJF4t3Hhzlri1\"\n" +
-                "}";
-        
-        // 发送请求
-        try (OutputStream os = connection.getOutputStream()) {
-            byte[] input = requestBody.getBytes(StandardCharsets.UTF_8);
-            os.write(input, 0, input.length);
-        }
-        
-        // 读取响应
-        int responseCode = connection.getResponseCode();
-        if (responseCode == HttpURLConnection.HTTP_OK) {
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
-                StringBuilder response = new StringBuilder();
-                String responseLine;
-                while ((responseLine = br.readLine()) != null) {
-                    response.append(responseLine.trim());
-                }
-                
-                // 解析访问令牌
-                String responseStr = response.toString();
-                int tokenStart = responseStr.indexOf("\"accessToken\":\"") + 15;
-                int tokenEnd = responseStr.indexOf("\"", tokenStart);
-                return responseStr.substring(tokenStart, tokenEnd);
-            }
-        } else {
-            throw new IOException("Failed to generate access token, response code: " + responseCode);
-        }
-    }
-
-    /**
-     * 发送消息并获取流式响应
-     * 
-     * @param prompt 用户输入
-     * @param sseUrl SSE连接地址
-     * @param outputStream 响应输出流
-     * @throws IOException IO异常
-     */
-    private void sendMessageAndStreamResponse(String prompt, String sseUrl, OutputStream outputStream) throws IOException {
-        // 先发送消息
-        String sendMessageUrl = "https://bailian-cs.console.aliyun.com/data/api.json?action=BroadScopeAspnGateway&product=sfm_bailian&api=zeldaEasy.broadscope-platform.messageConsoleApiService.getRemind&_v=undefined";
-        
-        URL url = new URL(sendMessageUrl);
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setRequestMethod("POST");
-        connection.setRequestProperty("Content-Type", "application/json");
-        connection.setRequestProperty("region", "cn-beijing");
-        connection.setRequestProperty("sec_token", "Nx38Yn8QwqJF4t3Hhzlri1");
-        connection.setDoOutput(true);
-        
-        // 构造请求参数
-        String feTraceId = UUID.randomUUID().toString();
-        String requestBody = "{\n" +
-                "  \"params\": \"{\\\"Api\\\":\\\"zeldaEasy.broadscope-platform.messageConsoleApiService.getRemind\\\",\\\"V\\\":\\\"1.0\\\",\\\"Data\\\":{\\\"cornerstoneParam\\\":{\\\"feTraceId\\\":\\\"" + feTraceId + "\\\",\\\"feURL\\\":\\\"https://bailian.console.aliyun.com/?spm=5176.30260724.J_VtPmWTA0QjMbFsMNZMB1P.1.548b7de1rt2v2u&tab=model#/efm/model_experience_center/text?currentTab=textChat&modelId=qwen3-next-80b-a3b-instruct\\\",\\\"protocol\\\":\\\"V2\\\",\\\"console\\\":\\\"ONE_CONSOLE\\\",\\\"productCode\\\":\\\"p_efm\\\",\\\"switchAgent\\\":12814336,\\\"switchUserType\\\":3,\\\"domain\\\":\\\"bailian.console.aliyun.com\\\",\\\"userNickName\\\":\\\"\\\",\\\"userPrincipalName\\\":\\\"\\\",\\\"xsp_lang\\\":\\\"zh-CN\\\"}}}\",\n" +
-                "  \"region\": \"cn-beijing\",\n" +
-                "  \"sec_token\": \"Nx38Yn8QwqJF4t3Hhzlri1\"\n" +
-                "}";
-        
-        // 发送请求
-        try (OutputStream os = connection.getOutputStream()) {
-            byte[] input = requestBody.getBytes(StandardCharsets.UTF_8);
-            os.write(input, 0, input.length);
-        }
-        
-        // 建立SSE连接并读取流式响应
-        URL sseURL = new URL(sseUrl);
-        HttpURLConnection sseConnection = (HttpURLConnection) sseURL.openConnection();
-        sseConnection.setRequestMethod("GET");
-        sseConnection.setRequestProperty("Accept", "text/event-stream");
-        sseConnection.setRequestProperty("Connection", "keep-alive");
-        sseConnection.setRequestProperty("Cache-Control", "no-cache");
-        
-        // 读取流式响应
-        try (BufferedReader br = new BufferedReader(
-                new InputStreamReader(sseConnection.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = br.readLine()) != null) {
-                // 将响应数据写入输出流
-                outputStream.write((line + "\n").getBytes(StandardCharsets.UTF_8));
-                outputStream.flush();
-            }
-        }
-        
-        connection.disconnect();
-        sseConnection.disconnect();
-    }
 }

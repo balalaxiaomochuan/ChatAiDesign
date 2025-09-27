@@ -8,6 +8,7 @@ import com.alibaba.dashscope.common.Role;
 import io.reactivex.Flowable;
 import io.reactivex.schedulers.Schedulers;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -20,6 +21,8 @@ import java.util.concurrent.CountDownLatch;
 @RequestMapping("/api/ai")
 @Slf4j
 public class AIStreamController {
+    @Value("${aliyun.aliyun-api-key}")
+    private String ali_api_key;
     private static final String PRESET_PROMPT = "请不要生成MarkDown形式。\n" +
             "请在回答完之后，提供几个用户还有可能会想问的问题（两到三个）。";
 
@@ -75,8 +78,7 @@ public class AIStreamController {
      */
     private void callQwenAPIWithSDK(String prompt, java.io.OutputStream outputStream, CountDownLatch latch) throws Exception {
         // 1. 获取 API Key
-        String apiKey = System.getenv("ALI_API_KEY");
-        if (apiKey == null || apiKey.isEmpty()) {
+        if (ali_api_key == null || ali_api_key.isEmpty()) {
             throw new IllegalStateException("请设置环境变量 ALI_API_KEY");
         }
 
@@ -85,7 +87,7 @@ public class AIStreamController {
 
         // 3. 构建请求参数
         GenerationParam param = GenerationParam.builder()
-                .apiKey(apiKey)
+                .apiKey(ali_api_key)
                 .model("qwen-plus")
                 .messages(Arrays.asList(
                         Message.builder()

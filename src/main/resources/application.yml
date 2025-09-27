@@ -21,12 +21,14 @@ spring:
   cloud:
     nacos:
       discovery:
+        enabled: false
         server-addr: 47.115.231.102:8848  # Nacos 服务器地址
         group: DEFAULT_GROUP  # 服务分组
         username: nacos  # Nacos 用户名
         password: nacos  # Nacos 密码
         service: ${spring.application.name}  # 服务名
       config:
+        enabled: false
         server-addr: 47.115.231.102:8848
         username: nacos
         password: nacos
@@ -60,3 +62,5 @@ mybatis:
     map-underscore-to-camel-case: true
     # 打印SQL语句（开发环境使用）
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+aliyun:
+  aliyun-api-key: ${ALI_API_KEY:sk-0b659a31c7804888a64a98f35f968704}

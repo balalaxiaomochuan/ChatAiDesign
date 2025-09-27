@@ -116,19 +116,6 @@ public class AIStreamController {
                                 // 输出内容，保持正确的SSE格式
                                 outputStream.write(("data: " + processedContent + "\n\n").getBytes());
                                 outputStream.flush();
-
-                                // 当 finishReason 不为 null 时，表示是最后一个 chunk，输出用量信息
-//                                if (finishReason != null && !"null".equals(finishReason)) {
-//                                    String usageInfo = String.format(
-//                                            "<|newline|>--- 请求用量 ---<|newline|>输入 Tokens：%d<|newline|>输出 Tokens：%d<|newline|>总 Tokens：%d",
-//                                            message.getUsage().getInputTokens(),
-//                                            message.getUsage().getOutputTokens(),
-//                                            message.getUsage().getTotalTokens()
-//                                    );
-//
-//                                    outputStream.write(("data: " + usageInfo + "\n\n").getBytes());
-//                                    outputStream.flush();
-//                                }
                             } catch (Exception e) {
                                 log.error("Error processing message", e);
                             }

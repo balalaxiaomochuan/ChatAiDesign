@@ -1,5 +1,6 @@
 package com.huawei.chataidesign.config;
 
+import com.huawei.chataidesign.config.interceptor.AuthenticationInterceptor;
 import com.huawei.chataidesign.config.interceptor.RequestLoggingInterceptor;
 import com.huawei.chataidesign.config.interceptor.UserInfoInterceptor;
 import jakarta.annotation.Resource;
@@ -17,6 +18,10 @@ public class WebMvcConfig implements WebMvcConfigurer {
     @Resource
     private UserInfoInterceptor userInfoInterceptor;
 
+    @Resource
+    private AuthenticationInterceptor authenticationInterceptor;
+
+
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(requestLoggingInterceptor)
@@ -27,14 +32,18 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .addPathPatterns("/**")  // 拦截所有请求
                 .excludePathPatterns("/health", "/metrics", "/favicon.ico"); // 排除健康检查等路径
 
+        registry.addInterceptor(authenticationInterceptor)
+                .addPathPatterns("/**")
+                .excludePathPatterns("/user/auth/register", "/user/auth/login");
+
     }
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        registry.addMapping("/api/**")
-                .allowedOrigins("*")
+        registry.addMapping("/**")
+                .allowedOriginPatterns("http://localhost:*", "http://127.0.0.1:*") // 明确指定允许的源
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
-                .allowCredentials(false);
+                .allowCredentials(true);
     }
 }

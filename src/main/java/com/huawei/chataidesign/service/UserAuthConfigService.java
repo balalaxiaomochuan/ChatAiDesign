@@ -1,23 +1,58 @@
 package com.huawei.chataidesign.service;
 
-import com.huawei.chataidesign.ChatAiDesignApplication;
+import com.huawei.chataidesign.config.SessionManager;
 import com.huawei.chataidesign.config.generator.ImageGenerator;
 import com.huawei.chataidesign.entity.User;
 import com.huawei.chataidesign.exception.ChatAiDesignException;
 import com.huawei.chataidesign.mapper.UserMapper;
 import jakarta.annotation.Resource;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.constraints.NotNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.time.Duration;
 
 @Service
 @Slf4j
 public class UserAuthConfigService {
     @Resource
     private UserMapper userMapper;
+
+    @Autowired
+    private SessionManager sessionManager;
+
+    public void login(@NotNull User loginReq, HttpServletResponse response) {
+        log.info("User login request received.");
+        User user = userMapper.getUserByUserName(loginReq.getUsername());
+        if (user == null) {
+            log.error("User not found.");
+            throw new ChatAiDesignException("User not found.");
+        }
+        if (!user.getPassword().equals(loginReq.getPassword())) {
+            log.error("Password error.");
+            throw new ChatAiDesignException("Password error.");
+        }
+        if (user.getStatus() != 1) {
+            log.error("User is disabled.");
+            throw new ChatAiDesignException("User is disabled.");
+        }
+        String sessionId = sessionManager.createSession(user);
+        ResponseCookie cookie = ResponseCookie.from("SESSION_ID", sessionId)
+                .httpOnly(true)
+                .path("/")
+                .maxAge(Duration.ofHours(24))
+                .secure(true)
+                .sameSite("Strict")
+                .build();
+        response.addHeader("Set-Cookie", cookie.toString());
+
+    }
     public void register(@NotNull User userRegisterReq) throws IOException {
         log.info("User register request received.");
         if (!isValidPassword(userRegisterReq.getPassword())) {
@@ -56,10 +91,6 @@ public class UserAuthConfigService {
         }
         // 密码不能超过32位
         if (passwd.length() > 32) {
-            return false;
-        }
-        // 必须包含至少一个数字
-        if (!passwd.matches(".*\\d.*")) {
             return false;
         }
         // 必须包含至少一个字母

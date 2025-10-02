@@ -5,6 +5,7 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.huawei.chataidesign.config.generator.NumberGenerateor;
 import lombok.Data;
 
 /**
@@ -66,6 +67,11 @@ public class User implements Serializable {
      */
     @JsonProperty(value = "updated_at")
     private LocalDateTime updated_at;
+
+    public void setUpdateAndCreateNowTime() {
+        this.setCreated_at(LocalDateTime.now());
+        this.setUpdated_at(LocalDateTime.now());
+    }
 
     @Serial
     private static final long serialVersionUID = 1L;

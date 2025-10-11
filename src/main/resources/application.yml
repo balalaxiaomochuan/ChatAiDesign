@@ -36,6 +36,19 @@ spring:
         file-extension: yaml
         timeout: 3000
         refresh-enabled: true
+  data:
+    redis:
+      host: 47.238.250.165
+      port: 6379
+      password: 19990226.xzc
+      database: 0
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms
 # Actuator 健康检查配置
 management:
   endpoints:
@@ -45,7 +58,9 @@ management:
   endpoint:
     health:
       show-details: always  # 显示健康检查详细信息
-
+jwt:
+  secret: mySecretKeyForChatAiDesignApplicationWhichIsVerySecureAndLongEnough
+  expiration: 86400000 # 24小时
 server:
   port: 8080
   servlet:

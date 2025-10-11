@@ -4,6 +4,7 @@ import java.io.Serial;
 import java.io.Serializable;
 import java.time.LocalDateTime;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.huawei.chataidesign.config.generator.NumberGenerateor;
 import lombok.Data;
@@ -60,12 +61,14 @@ public class User implements Serializable {
      * 创建时间
      */
     @JsonProperty(value = "created_at")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime created_at;
 
     /**
      * 更新时间
      */
     @JsonProperty(value = "updated_at")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime updated_at;
 
     public void setUpdateAndCreateNowTime() {

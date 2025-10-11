@@ -3,55 +3,80 @@ package com.huawei.chataidesign.service;
 import com.huawei.chataidesign.config.SessionManager;
 import com.huawei.chataidesign.config.generator.ImageGenerator;
 import com.huawei.chataidesign.entity.User;
+import com.huawei.chataidesign.entity.response.CommonResponse;
 import com.huawei.chataidesign.exception.ChatAiDesignException;
 import com.huawei.chataidesign.mapper.UserMapper;
+import com.huawei.chataidesign.repository.redis.RedisRepository;
+import com.huawei.chataidesign.utils.JwtUtil;
 import jakarta.annotation.Resource;
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.constraints.NotNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseCookie;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.time.Duration;
+import java.util.Map;
 
 @Service
 @Slf4j
 public class UserAuthConfigService {
+    @Autowired
+    private RedisRepository redisRepository;
+
     @Resource
     private UserMapper userMapper;
 
     @Autowired
     private SessionManager sessionManager;
 
-    public void login(@NotNull User loginReq, HttpServletResponse response) {
+    @Resource
+    private AuthenticationManager authenticationManager;
+
+    @Resource
+    private JwtUtil jwtUtil;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Resource
+    private CustomUserDetailsService customUserDetailsService;
+
+    public CommonResponse<Map<String, String>> login(@NotNull User loginReq, HttpServletResponse response) {
         log.info("User login request received.");
         User user = userMapper.getUserByUserName(loginReq.getUsername());
         if (user == null) {
             log.error("User not found.");
             throw new ChatAiDesignException("User not found.");
         }
-        if (!user.getPassword().equals(loginReq.getPassword())) {
-            log.error("Password error.");
-            throw new ChatAiDesignException("Password error.");
-        }
+//        if (!user.getPassword().equals(loginReq.getPassword())) {
+//            log.error("Password error.");
+//            throw new ChatAiDesignException("Password error.");
+//        }
         if (user.getStatus() != 1) {
             log.error("User is disabled.");
             throw new ChatAiDesignException("User is disabled.");
         }
-        String sessionId = sessionManager.createSession(user);
-        ResponseCookie cookie = ResponseCookie.from("SESSION_ID", sessionId)
-                .httpOnly(true)
-                .path("/")
-                .maxAge(Duration.ofHours(24))
-                .secure(true)
-                .sameSite("Strict")
-                .build();
-        response.addHeader("Set-Cookie", cookie.toString());
 
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(
+                        loginReq.getUsername(),
+                        loginReq.getPassword()
+                )
+        );
+
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        User userDetails = customUserDetailsService.getUserByName(user.getUsername());
+        String jwt = jwtUtil.generateToken(userDetails);
+        return CommonResponse.success(Map.of("token", jwt));
     }
     public void register(@NotNull User userRegisterReq) throws IOException {
         log.info("User register request received.");
@@ -76,6 +101,7 @@ public class UserAuthConfigService {
         }
         userRegisterReq.setStatus(1);
         userRegisterReq.setUpdateAndCreateNowTime();
+        userRegisterReq.setPassword(passwordEncoder.encode(userRegisterReq.getPassword()));
         userMapper.insert(userRegisterReq);
     }
 

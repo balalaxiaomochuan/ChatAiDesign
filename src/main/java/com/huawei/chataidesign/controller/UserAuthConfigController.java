@@ -8,6 +8,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 @RestController
 @RequestMapping("/user/auth")
 @Slf4j
@@ -16,11 +18,10 @@ public class UserAuthConfigController {
     private UserAuthConfigService userAuthConfigService;
 
     @PostMapping("/login")
-    public CommonResponse<String> login(@RequestBody User req, HttpServletResponse response) {
+    public CommonResponse<Map<String, String>> login(@RequestBody User req, HttpServletResponse response) {
         try {
             log.info("User login request received.");
-            userAuthConfigService.login(req, response);
-            return CommonResponse.success(req.getNickname() + " login success!");
+            return userAuthConfigService.login(req, response);
         } catch (Exception e) {
             log.error("Error during user login: ", e);
             return CommonResponse.error(e.getMessage());

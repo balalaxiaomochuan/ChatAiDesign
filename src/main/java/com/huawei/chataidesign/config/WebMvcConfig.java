@@ -32,9 +32,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .addPathPatterns("/**")  // 拦截所有请求
                 .excludePathPatterns("/health", "/metrics", "/favicon.ico"); // 排除健康检查等路径
 
-        registry.addInterceptor(authenticationInterceptor)
-                .addPathPatterns("/**")
-                .excludePathPatterns("/user/auth/register", "/user/auth/login");
+//        registry.addInterceptor(authenticationInterceptor)
+//                .addPathPatterns("/**")
+//                .excludePathPatterns("/user/auth/register", "/user/auth/login");
 
     }
 

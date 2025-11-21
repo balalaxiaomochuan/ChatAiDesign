@@ -35,9 +35,6 @@ public class UserAuthConfigService {
     @Resource
     private UserMapper userMapper;
 
-    @Autowired
-    private SessionManager sessionManager;
-
     @Resource
     private AuthenticationManager authenticationManager;
 
@@ -57,10 +54,7 @@ public class UserAuthConfigService {
             log.error("User not found.");
             throw new ChatAiDesignException("User not found.");
         }
-//        if (!user.getPassword().equals(loginReq.getPassword())) {
-//            log.error("Password error.");
-//            throw new ChatAiDesignException("Password error.");
-//        }
+
         if (user.getStatus() != 1) {
             log.error("User is disabled.");
             throw new ChatAiDesignException("User is disabled.");

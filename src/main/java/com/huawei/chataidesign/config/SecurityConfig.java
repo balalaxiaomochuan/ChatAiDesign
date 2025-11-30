@@ -72,6 +72,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(authz -> authz
                         .requestMatchers("/user/auth/register").permitAll()
                         .requestMatchers("/user/auth/login").permitAll()
+//                        .requestMatchers("/api/ai/stream").permitAll()
                         .anyRequest().authenticated()
                 );
 

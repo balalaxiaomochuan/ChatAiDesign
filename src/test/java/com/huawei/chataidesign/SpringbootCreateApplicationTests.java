@@ -1,4 +1,4 @@
-package com.huawei.springbootcreate;
+package com.huawei.chataidesign;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;

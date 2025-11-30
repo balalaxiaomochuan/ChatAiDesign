@@ -63,7 +63,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 return headerAuth; // 直接返回纯 token
             }
         }
-
+        log.info("cherry pick1");
         return null;
     }
 }

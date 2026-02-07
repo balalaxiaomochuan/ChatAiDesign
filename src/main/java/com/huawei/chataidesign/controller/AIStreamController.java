@@ -9,6 +9,8 @@ import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 
+import java.time.Duration;
+
 
 @RestController
 @RequestMapping("/api/ai")
@@ -24,6 +26,14 @@ public class AIStreamController {
                 .map(chunk -> ServerSentEvent
                         .<String>builder()
                         .data(chunk)
-                        .build());
+                        .build())
+                .timeout(Duration.ofMinutes(5)) // 设置较长的超时时间
+                .onErrorResume(throwable -> {
+                    log.error("Error during streaming", throwable);
+                    return Flux.just(ServerSentEvent.<String>builder()
+                            .event("error")
+                            .data("Error occurred during streaming: " + throwable.getMessage())
+                            .build());
+                });
     }
 }

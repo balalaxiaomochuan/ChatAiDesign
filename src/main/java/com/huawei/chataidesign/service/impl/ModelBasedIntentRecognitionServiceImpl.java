@@ -1,9 +1,16 @@
 package com.huawei.chataidesign.service.impl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huawei.chataidesign.entity.IntentClassification;
 import com.huawei.chataidesign.entity.IntentType;
 import com.huawei.chataidesign.entity.request.IntentPromptReq;
 import com.huawei.chataidesign.service.IntentRecognitionService;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.service.SystemMessage;
+import dev.langchain4j.service.UserMessage;
+import dev.langchain4j.service.AiServices;
+import dev.langchain4j.model.chat.ChatModel;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -12,19 +19,37 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 简化版意图识别服务实现
- * 使用关键词匹配的临时解决方案
+ * 意图识别服务接口
+ * 使用LangChain4j的注解方式调用大模型
+ */
+interface IntentRecognitionAiService {
+    @SystemMessage("你是一个专业的意图分类助手。你的任务是根据用户输入，识别其主要意图。请以JSON格式返回分类结果，包含以下字段：intentCode（意图编码）、intentName（意图名称）、confidence（置信度0.0-1.0）、intentDescription（意图描述）、suggestedAction（建议的后续动作）、needsConfirmation（是否需要进一步确认）、entities（提取的关键实体，可选）。")
+    String recognizeIntent(@UserMessage String userInput);
+}
+
+/**
+ * 基于大模型的意图识别服务实现
+ * 使用AI模型进行意图分类，支持结构化输出
  */
 @Slf4j
 @Service
 public class ModelBasedIntentRecognitionServiceImpl implements IntentRecognitionService {
-    
+
+    @Resource(name = "qwenChatModel")
+    private ChatModel chatModel;
+
+    private IntentRecognitionAiService aiService;
+
     @Resource
     private RedisTemplate<String, Object> redisTemplate;
+
+    @Resource
+    private ObjectMapper objectMapper;
     
     @Value("${intent.recognition.cache.enabled:true}")
     private boolean cacheEnabled;
@@ -42,8 +67,12 @@ public class ModelBasedIntentRecognitionServiceImpl implements IntentRecognition
     
     @PostConstruct
     public void init() {
-        log.info("ModelBasedIntentRecognitionService initialized with cache={}, ttl={} minutes", 
+        log.info("ModelBasedIntentRecognitionService initialized with cache={}, ttl={} minutes",
                 cacheEnabled, cacheTtlMinutes);
+        // 使用AiServices创建意图识别服务
+        aiService = AiServices.builder(IntentRecognitionAiService.class)
+                .chatModel(chatModel)
+                .build();
     }
     
     @Override
@@ -60,10 +89,10 @@ public class ModelBasedIntentRecognitionServiceImpl implements IntentRecognition
     public IntentClassification recognizeIntent(IntentPromptReq promptReq) {
         totalRequests.incrementAndGet();
         String userInput = promptReq.getPrompt();
-        
-        // 简单的关键词匹配实现（临时方案），当前使用的是关键词匹配，企业级项目中可能会用机器学习、神经网络来做文本分类，泛化性会更好
-        IntentClassification result = performKeywordBasedRecognition(userInput);
-        
+
+        // 使用大模型进行意图识别
+        IntentClassification result = performModelBasedRecognition(userInput);
+
         return result;
     }
     
@@ -102,48 +131,144 @@ public class ModelBasedIntentRecognitionServiceImpl implements IntentRecognition
     }
     
     /**
-     * 基于关键词的简单意图识别（临时实现）
+     * 基于大模型的意图识别
      */
-    private IntentClassification performKeywordBasedRecognition(String userInput) {
+    private IntentClassification performModelBasedRecognition(String userInput) {
+        modelCalls.incrementAndGet();
+
         IntentClassification classification = new IntentClassification();
         classification.setIntentId(UUID.randomUUID().toString());
         classification.setUserInput(userInput);
         classification.setProcessedAt(LocalDateTime.now());
-        classification.setConfidence(0.8); // 默认置信度
-        classification.setNeedsConfirmation(false);
-        
-        String lowerInput = userInput.toLowerCase();
-        
-        // 简单的关键词匹配逻辑
-        if (lowerInput.contains("学习") || lowerInput.contains("学") || lowerInput.contains("路线")) {
-            classification.setPrimaryIntent(IntentType.LEARNING_PATH);
-            classification.setIntentDescription("学习路线规划");
-            classification.setSuggestedAction("检测到学习路线咨询，将为您提供个性化的学习建议");
-        } else if (lowerInput.contains("项目") || lowerInput.contains("练手")) {
-            classification.setPrimaryIntent(IntentType.PROJECT_GUIDANCE);
-            classification.setIntentDescription("项目指导");
-            classification.setSuggestedAction("检测到项目指导需求，将为您推荐合适的项目方案");
-        } else if (lowerInput.contains("面试") || lowerInput.contains("求职")) {
-            classification.setPrimaryIntent(IntentType.INTERVIEW_PREPARATION);
-            classification.setIntentDescription("面试准备");
-            classification.setSuggestedAction("检测到面试准备需求，将为您提供面试指导");
-        } else if (lowerInput.contains("技术") || lowerInput.contains("问题") || lowerInput.contains("怎么") || lowerInput.contains("如何")) {
-            classification.setPrimaryIntent(IntentType.TECHNICAL_QUESTION);
-            classification.setIntentDescription("技术问题");
-            classification.setSuggestedAction("检测到技术问题，将为您提供专业的技术解答");
-        } else if (lowerInput.contains("你好") || lowerInput.contains("hello") || lowerInput.contains("hi")) {
-            classification.setPrimaryIntent(IntentType.GREETING);
-            classification.setIntentDescription("问候");
-            classification.setSuggestedAction("您好！我是您的编程学习助手，有什么可以帮助您的吗？");
-        } else {
+
+        try {
+            // 构建完整提示词，包含意图类型信息
+            String fullPrompt = buildFullPrompt(userInput);
+
+            // 使用AiServices调用大模型
+            String jsonResponse = aiService.recognizeIntent(fullPrompt);
+
+            log.info("Model response for intent recognition: {}", jsonResponse);
+
+            // 解析JSON响应
+            classification = parseJsonResponse(jsonResponse, userInput);
+
+        } catch (Exception e) {
+            log.error("Error during model-based intent recognition: {}", e.getMessage(), e);
+            // 降级处理：返回OTHER意图
             classification.setPrimaryIntent(IntentType.OTHER);
-            classification.setIntentDescription("其他");
-            classification.setSuggestedAction("已识别您的需求，正在为您准备相关回答");
+            classification.setConfidence(0.3);
+            classification.setIntentDescription("意图识别失败，降级处理");
+            classification.setSuggestedAction("已收到您的消息，正在为您处理");
         }
-        
-        log.debug("Keyword-based intent recognition result: {} for input: {}", 
-                classification.getPrimaryIntent(), userInput);
-        
+
+        return classification;
+    }
+
+    /**
+     * 构建完整提示词
+     */
+    private String buildFullPrompt(String userInput) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("你是一个专业的意图分类助手。你的任务是根据用户输入，识别其主要意图。\n\n");
+        sb.append("支持的意图类型如下：\n");
+        for (IntentType intentType : IntentType.values()) {
+            sb.append(String.format("- %s (%s): %s\n",
+                    intentType.getDisplayName(),
+                    intentType.getCode(),
+                    intentType.getDescription()));
+        }
+        sb.append("\n请以JSON格式返回分类结果，包含以下字段：\n");
+        sb.append("- intentCode: 意图编码（code）\n");
+        sb.append("- intentName: 意图名称（displayName）\n");
+        sb.append("- confidence: 置信度（0.0-1.0之间的数值）\n");
+        sb.append("- intentDescription: 意图描述\n");
+        sb.append("- suggestedAction: 建议的后续动作\n");
+        sb.append("- needsConfirmation: 是否需要进一步确认（true/false）\n");
+        sb.append("- entities: 提取的关键实体（可选）\n");
+        sb.append("\n用户输入：\n");
+        sb.append(userInput);
+        sb.append("\n\n请只返回JSON，不要包含其他内容。");
+        return sb.toString();
+    }
+
+    /**
+     * 解析大模型返回的JSON响应
+     */
+    private IntentClassification parseJsonResponse(String jsonResponse, String userInput) {
+        try {
+            // 提取JSON内容（去除可能的markdown代码块标记）
+            String cleanJson = extractJsonContent(jsonResponse);
+
+            Map<String, Object> responseMap = objectMapper.readValue(cleanJson, Map.class);
+
+            IntentClassification classification = new IntentClassification();
+            classification.setIntentId(UUID.randomUUID().toString());
+            classification.setUserInput(userInput);
+            classification.setProcessedAt(LocalDateTime.now());
+
+            // 解析意图编码
+            String intentCode = (String) responseMap.get("intentCode");
+            classification.setPrimaryIntent(IntentType.fromCode(intentCode));
+
+            // 解析置信度
+            Object confidenceObj = responseMap.get("confidence");
+            if (confidenceObj instanceof Number) {
+                classification.setConfidence(((Number) confidenceObj).doubleValue());
+            } else {
+                classification.setConfidence(0.8);
+            }
+
+            // 解析其他字段
+            classification.setIntentDescription((String) responseMap.get("intentDescription"));
+            classification.setSuggestedAction((String) responseMap.get("suggestedAction"));
+            classification.setEntities(responseMap.get("entities").toString());
+
+            Object needsConfirm = responseMap.get("needsConfirmation");
+            classification.setNeedsConfirmation(needsConfirm instanceof Boolean ? (Boolean) needsConfirm : false);
+
+            log.info("Parsed intent classification: {} with confidence: {}",
+                    classification.getPrimaryIntent(), classification.getConfidence());
+
+            return classification;
+
+        } catch (JsonProcessingException e) {
+            log.error("Failed to parse JSON response: {}", jsonResponse, e);
+            // 降级处理
+            return createFallbackClassification(userInput, "JSON解析失败");
+        }
+    }
+
+    /**
+     * 提取JSON内容，去除可能的markdown代码块标记
+     */
+    private String extractJsonContent(String response) {
+        String trimmed = response.trim();
+        // 去除 ```json 开头和 ``` 结尾
+        if (trimmed.startsWith("```json")) {
+            trimmed = trimmed.substring(7);
+        } else if (trimmed.startsWith("```")) {
+            trimmed = trimmed.substring(3);
+        }
+        if (trimmed.endsWith("```")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 3);
+        }
+        return trimmed.trim();
+    }
+
+    /**
+     * 创建降级分类结果
+     */
+    private IntentClassification createFallbackClassification(String userInput, String reason) {
+        IntentClassification classification = new IntentClassification();
+        classification.setIntentId(UUID.randomUUID().toString());
+        classification.setUserInput(userInput);
+        classification.setProcessedAt(LocalDateTime.now());
+        classification.setPrimaryIntent(IntentType.OTHER);
+        classification.setConfidence(0.3);
+        classification.setIntentDescription("识别失败: " + reason);
+        classification.setSuggestedAction("已收到您的消息，正在为您处理");
+        classification.setNeedsConfirmation(true);
         return classification;
     }
 }

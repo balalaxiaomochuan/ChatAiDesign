@@ -3,17 +3,19 @@ package com.huawei.chataidesign.service;
 
 import jakarta.annotation.Resource;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
 class AiChatServiceTest {
 
     @Resource
-    private AiChatService aiCodeHelper;
+    @Qualifier("aiChatService")
+    private AiChatService aiChatService;
 
     @Test
     void chat() {
-        String result = aiCodeHelper.chat("你好，我是xiezichuan");
+        String result = aiChatService.chat("你好，我是xiezichuan");
         System.out.println(result);
     }
 
@@ -28,21 +30,21 @@ class AiChatServiceTest {
 
     @Test
     void chatWithMemery() {
-        String result = aiCodeHelper.chat("你好，我是xiezichuan");
+        String result = aiChatService.chat("你好，我是xiezichuan");
         System.out.println(result);
-        result = aiCodeHelper.chat("我是谁？");
+        result = aiChatService.chat("我是谁？");
         System.out.println(result);
     }
 
     @Test
     void chatWithRag() {
-        String result = aiCodeHelper.chat("请帮我列举一些计算机面试题，要求语言精简");
+        String result = aiChatService.chat("请帮我列举一些计算机面试题，要求语言精简");
         System.out.println(result);
     }
 
     @Test
     void chatWithMcp() {
-        String result = aiCodeHelper.chat("什么是小林Coding?");
+        String result = aiChatService.chat("什么是小林Coding?");
         System.out.println(result);
     }
 }
